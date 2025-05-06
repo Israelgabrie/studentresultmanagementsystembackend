@@ -1,27 +1,153 @@
-const mongoose = require('mongoose'); 
-require('dotenv').config();
+const mongoose = require("mongoose");
+require("dotenv").config();
 
-const userSchema = new mongoose.Schema({
+// --- 1. User Schema ---
+const userSchema = new mongoose.Schema(
+  {
     firstName: { type: String, required: true },
     lastName: { type: String, required: true },
     email: { type: String, required: true, unique: true },
-    accountType: { type: String, required: true },
     idNumber: { type: String, required: true, unique: true },
-    password: { type: String, required: true }
-}, { timestamps: true });
+    password: { type: String, required: true },
+    accountType: { type: String, enum: ['student', 'lecturer', 'superAdmin'], required: true },
+    department: { type: String }, // <- Add this
+    programme: { type: String },  // <- Add this
+  },
+  { timestamps: true }
+);
 
-const userModel = mongoose.model('User', userSchema); 
+const User = mongoose.model("User", userSchema);
 
+// --- 2. Department Schema ---
+const departmentSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true, unique: true },
+    programmes: [{ type: String }],
+  },
+  { timestamps: true }
+);
+
+const Department = mongoose.model("Department", departmentSchema);
+
+// --- 3. Course Schema ---
+const courseSchema = new mongoose.Schema(
+  {
+    courseCode: { type: String, required: true, unique: true },
+    courseTitle: { type: String, required: true },
+  },
+  { timestamps: true }
+);
+
+const Course = mongoose.model("Course", courseSchema);
+
+// --- 4. PrivilegeRequest Schema ---
+const privilegeRequestSchema = new mongoose.Schema(
+  {
+    lecturer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    course: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Course",
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    requestedAt: { type: Date, default: Date.now },
+    courseCode: { type: String, required: true },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // superadmin
+  },
+  { timestamps: true }
+);
+
+const PrivilegeRequest = mongoose.model(
+  "PrivilegeRequest",
+  privilegeRequestSchema
+);
+
+
+
+// --- 5. Result Schema (with test and exam scores) ---
+const resultSchema = new mongoose.Schema(
+  {
+    student: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    course: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Course",
+      required: true,
+    },
+    testScore: { type: Number},
+    examScore: { type: Number},
+    totalScore: { type: Number, required: true },
+    unit: { type: Number, required: true },
+    grade: { type: String, required: true },
+    semester: { type: String, required: true },
+    session: { type: String, required: true },
+    uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    uploadedAt: { type: Date, default: Date.now },
+    approved: { type: Boolean, default: false }, // Added approval field
+    approvedBy: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: "User", 
+      required: false 
+    }, // Super Admin who approves the result
+    approvedAt: { type: Date, required: false } // Timestamp for approval
+  },
+  { timestamps: true }
+);
+
+const Result = mongoose.model("Result", resultSchema);
+
+// --- 6. SemesterSession Schema (optional) ---
+const semesterSessionSchema = new mongoose.Schema(
+  {
+    semester: { type: String, required: true }, // 'First' | 'Second'
+    session: { type: String, required: true }, // e.g. '2024/2025'
+    isActive: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
+const SemesterSession = mongoose.model(
+  "SemesterSession",
+  semesterSessionSchema
+);
+
+// --- Database Connection ---
 async function startConnection() {
-    try {
-        const connectionString = process.env.DATABASE_CONNECTION_STRING;
-        await mongoose.connect(connectionString);
-        console.log("MongoDB Connection Successfully");
-        return true; 
-    } catch (error) {
-        console.error(`Error establishing database connection: ${error.message}`);
-        return false; 
-    }
+  try {
+    const uri = process.env.DATABASE_CONNECTION_STRING;
+    await mongoose.connect(uri, {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log("MongoDB connected");
+    return true;
+  } catch (err) {
+    console.error("DB connection error:", err);
+    return false;
+  }
 }
 
-module.exports = { startConnection, userModel }; 
+module.exports = {
+  startConnection,
+  User,
+  Department,
+  Course,
+  PrivilegeRequest,
+  Result,
+  SemesterSession,
+};

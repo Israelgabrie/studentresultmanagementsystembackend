@@ -1,3 +1,4 @@
+
 //This is the file that contains all the departments and the programme under each of them
 const departments = [
     {
@@ -141,4 +142,8 @@ const departments = [
     }
 ];
 
-module.exports = { departments };
+
+  
+  
+
+ module.exports = { departments };
