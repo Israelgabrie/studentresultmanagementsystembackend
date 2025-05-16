@@ -329,6 +329,8 @@ superAdminRouter.post("/handleResultApproval", async (req, res) => {
 });
 
 
+
+
 superAdminRouter.post("/dashboardData", async (req, res) => {
   try {
     const { userId } = req.body;
@@ -446,6 +448,254 @@ superAdminRouter.post("/dashboardData", async (req, res) => {
   }
 });
 
+superAdminRouter.post("/addCourse", async (req, res) => {
+  try {
+    const { userId, courseCode, courseTitle } = req.body;
+
+    // Validate required fields
+    if (!userId || !courseCode || !courseTitle) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields: userId, courseCode, or courseTitle.",
+      });
+    }
+
+    // Validate super admin access
+    const user = await User.findById(userId);
+    if (!user || user.accountType !== "superAdmin") {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized: You do not have the required permissions.",
+      });
+    }
+
+    // Validate courseCode format (e.g., CSC 101, MTH 201)
+    const codePattern = /^[A-Z]{3}\s\d{3}$/;
+    if (!codePattern.test(courseCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid course code format. Use format like 'CSC 101'.",
+      });
+    }
+
+    // Check for duplicate courseCode
+    const existingCourse = await Course.findOne({ courseCode: courseCode.trim().toUpperCase() });
+    if (existingCourse) {
+      return res.status(409).json({
+        success: false,
+        message: "A course with this course code already exists.",
+      });
+    }
+
+    // Save the course
+    const courseInstance = new Course({
+      courseCode: courseCode.trim().toUpperCase(),
+      courseTitle: courseTitle.trim(),
+    });
+
+    await courseInstance.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Course added successfully.",
+      course: {
+        id: courseInstance._id,
+        courseCode: courseInstance.courseCode,
+        courseTitle: courseInstance.courseTitle,
+      },
+    });
+  } catch (err) {
+    console.error("Add course error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: err.message,
+    });
+  }
+});
+
+
+superAdminRouter.get("/randomCourses", async (req, res) => {
+  try {
+    const randomCourses = await Course.aggregate([{ $sample: { size: 15 } }]);
+
+    res.status(200).json({
+      success: true,
+      message: "Fetched 15 random courses successfully.",
+      courses: randomCourses,
+    });
+  } catch (err) {
+    console.error("Fetch random courses error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching random courses.",
+      error: err.message,
+    });
+  }
+});
+
+
+superAdminRouter.post("/deleteCourse", async (req, res) => {
+  try {
+    const { userId, courseId } = req.body;
+    console.log(userId, courseId)
+
+    // Validate user
+    const user = await User.findById(userId);
+    if (!user || user.accountType !== 'superAdmin') {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized: Only superAdmins can delete courses.",
+      });
+    }
+
+    // Check if course exists
+    const course = await Course.findById(courseId);
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: "Course not found.",
+      });
+    }
+
+    // Delete the course
+    await Course.findByIdAndDelete(courseId);
+
+    // Fetch 15 random courses after deletion
+    const randomCourses = await Course.aggregate([{ $sample: { size: 15 } }]);
+
+    res.status(200).json({
+      success: true,
+      message: "Course deleted successfully.",
+      courses: randomCourses,
+    });
+  } catch (err) {
+    console.error("Delete course error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Server error while deleting course.",
+      error: err.message,
+    });
+  }
+});
+
+
+superAdminRouter.post('/searchCourse', async (req, res) => {
+  try {
+    const { query } = req.body;
+
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ success: false, message: 'Search query is required and must be a string.' });
+    }
+
+    const regex = new RegExp(query, 'i'); // Case-insensitive partial match
+
+    const results = await Course.find({
+      $or: [{ courseTitle: regex }, { courseCode: regex }]
+    }).limit(20); // limit for performance
+
+    res.status(200).json({ success: true, results });
+  } catch (error) {
+    console.error('Error searching for courses:', error);
+    res.status(500).json({ success: false, message: 'Server error while searching courses.' });
+  }
+});
+
+
+superAdminRouter.get("/getAdmins", async (req, res) => {
+  try {
+    const admins = await User.find({ accountType: "admin" }).select(
+      "firstName lastName email idNumber"
+    );
+
+    const adminDetails = await Promise.all(
+      admins.map(async (admin) => {
+        const resultCount = await Result.countDocuments({ uploadedBy: admin?._id });
+
+        const approvedCoursesCount = await PrivilegeRequest.countDocuments({
+          lecturer: admin?._id,
+          status: "approved",
+        });
+
+        return {
+          id: admin?._id,
+          name: `${admin?.firstName ?? ""} ${admin?.lastName ?? ""}`.trim(),
+          email: admin?.email ?? "",
+          idNumber: admin?.idNumber ?? "",
+          resultsUploaded: resultCount,
+          approvedCourses: approvedCoursesCount,
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "All admin details fetched successfully.",
+      admins: adminDetails,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error?.message ?? "Internal server error",
+    });
+  }
+});
+
+superAdminRouter.post("/searchAdmins", async (req, res) => {
+  try {
+    const { term } = req.body;
+
+    if (!term?.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Search term is required.",
+      });
+    }
+
+    const regex = new RegExp(term.trim(), "i"); // Case-insensitive regex
+
+    const admins = await User.find({
+      accountType: "admin",
+      $or: [
+        { firstName: regex },
+        { lastName: regex },
+        { email: regex },
+        { idNumber: regex },
+      ],
+    }).select("firstName lastName email idNumber");
+
+    const adminDetails = await Promise.all(
+      admins.map(async (admin) => {
+        const resultCount = await Result.countDocuments({ uploadedBy: admin?._id });
+
+        const approvedCoursesCount = await PrivilegeRequest.countDocuments({
+          lecturer: admin?._id,
+          status: "approved",
+        });
+
+        return {
+          id: admin?._id,
+          name: `${admin?.firstName ?? ""} ${admin?.lastName ?? ""}`.trim(),
+          email: admin?.email ?? "",
+          idNumber: admin?.idNumber ?? "",
+          resultsUploaded: resultCount,
+          approvedCourses: approvedCoursesCount,
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Admins fetched successfully.",
+      admins: adminDetails,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error?.message || "Internal server error",
+    });
+  }
+});
 
 
 module.exports = { superAdminRouter };

@@ -6,9 +6,10 @@ const startConnection = require("./databaseConnection").startConnection;
 const userRouter = require("./users/api").userRouter;
 const adminRouter = require("./admin/admin").adminRouter;
 const { getAllCourses, getCourseRequests, removeCourseRequest ,getAllCourseRequests} = require("./webSocket/adminWebSocket");
-const department = require("./departments").departments;
+// const department = require("./departments").departments;
 const cors = require("cors");
 const {superAdminRouter} = require("./superAdminRoutes/superAdminRouter");
+const { Department } = require("./databaseConnection");
 
 
 // ✅ CORS Configuration
@@ -28,8 +29,9 @@ app.use("/admin", adminRouter);
 app.use("/superAdmin",superAdminRouter);
 
 // API route to get departments
-app.get("/getDepartment", (req, res) => {
+app.get("/getDepartment", async(req, res) => {
     try {
+        const department = await Department.find();
         res.send({
             success: true,
             message: "Departments retrieved successfully",

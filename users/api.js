@@ -90,12 +90,24 @@ userRouter.post("/getUser", async (req, res) => {
     }
 });
 
+
 // Route to add a new user
 userRouter.post("/addUser", async (req, res) => {
     try {
         console.log(req.body);
 
-        const { firstName, lastName, email, department, programme, idNumber, password, superAdminPasscode, accountType } = req.body;
+        const {
+            firstName,
+            lastName,
+            email,
+            department,
+            programme,
+            session, // new field
+            idNumber,
+            password,
+            superAdminPasscode,
+            accountType,
+        } = req.body;
 
         // Validate required fields
         if (!firstName || !lastName || !email || !idNumber || !password || !accountType) {
@@ -105,11 +117,11 @@ userRouter.post("/addUser", async (req, res) => {
         // Check if the email or ID number is already registered
         const existingUser = await userModel.findOne({ $or: [{ email }, { idNumber }] });
         if (existingUser) {
-            return res.status(409).json({ 
-                success: false, 
-                message: existingUser.email === email 
-                    ? "Email is already registered. Use a different email." 
-                    : "ID number is already registered. Use a different ID number." 
+            return res.status(409).json({
+                success: false,
+                message: existingUser.email === email
+                    ? "Email is already registered. Use a different email."
+                    : "ID number is already registered. Use a different ID number."
             });
         }
 
@@ -132,8 +144,11 @@ userRouter.post("/addUser", async (req, res) => {
         });
 
         // Add optional fields only if they exist
-        if (department) newUser.department = department;
-        if (programme) newUser.programme = programme;
+        if (accountType === "student") {
+            if (department) newUser.department = department;
+            if (programme) newUser.programme = programme;
+            if (session) newUser.session = session;
+        }
 
         // Save the user to the database
         const savedUser = await newUser.save();
@@ -141,10 +156,11 @@ userRouter.post("/addUser", async (req, res) => {
         console.log("New user added");
         res.status(201).json({ success: true, message: "Registration Successful", user: savedUser });
     } catch (error) {
-      console.log("error adding user "+error.message)
+        console.log("error adding user " + error.message);
         res.status(500).json({ success: false, message: error.message });
     }
 });
+
 
 // Route to get the logged-in user
 userRouter.get("/getLoggedInUser", async (req, res) => {

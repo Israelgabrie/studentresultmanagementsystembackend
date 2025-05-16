@@ -1,3 +1,4 @@
+const {Department} = require("./databaseConnection.js");
 
 //This is the file that contains all the departments and the programme under each of them
 const departments = [
@@ -143,6 +144,14 @@ const departments = [
 ];
 
 
+// departments.forEach(async(departmentObject)=>{
+//     console.log("saving department")
+//     const newDepartment = await new Department({
+//         name:departmentObject.name,
+//         programmes:departmentObject.Programmes
+//     })
+//     newDepartment.save()
+// })
   
   
 

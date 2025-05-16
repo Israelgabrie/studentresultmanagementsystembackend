@@ -9,9 +9,11 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true },
     idNumber: { type: String, required: true, unique: true },
     password: { type: String, required: true },
-    accountType: { type: String, enum: ['student', 'lecturer', 'superAdmin'], required: true },
+    accountType: { type: String, enum: ['student', 'admin', 'superAdmin'], required: true },
     department: { type: String }, // <- Add this
     programme: { type: String },  // <- Add this
+    session: { type: String },
+
   },
   { timestamps: true }
 );
