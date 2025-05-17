@@ -1,6 +1,7 @@
 const express = require("express");
 const adminRouter = express.Router();
 const department = require("../departments.js");
+const bcrypt = require("bcrypt");
 
 const {
   startConnection,
@@ -840,6 +841,70 @@ adminRouter.get("/courses-and-sessions", async (req, res) => {
   } catch (error) {
     console.error("Error fetching courses and sessions:", error);
     return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+
+adminRouter.post("/change-password", async (req, res) => {
+  const { adminId, oldPassword, newPassword } = req.body;
+
+  console.log( adminId, oldPassword, newPassword )
+
+  try {
+    const admin = await User.findById(adminId);
+    if (!admin || admin.accountType !== "admin") {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    const isMatch = await bcrypt.compare(oldPassword, admin.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: "Old password is incorrect" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    admin.password = hashedPassword;
+    await admin.save();
+
+    res.status(200).json({success:true, message: "Password changed successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Error changing password", error: err.message });
+  }
+});
+
+
+adminRouter.get("/semester/current-next", async (req, res) => {
+  try {
+    const current = await SemesterSession.findOne({ isActive: true });
+    if (!current) {
+      return res.status(404).json({ message: "No active semester found" });
+    }
+
+    let nextSemester, nextSession;
+
+    if (current.semester.toLowerCase() === "first") {
+      nextSemester = "Second";
+      nextSession = current.session;
+    } else {
+      nextSemester = "First";
+
+      // Increment session: e.g., "2024/2025" → "2025/2026"
+      const [start, end] = current.session.split("/").map(Number);
+      nextSession = `${start + 1}/${end + 1}`;
+    }
+
+    res.status(200).json({
+      success:true,
+      current: {
+        semester: current.semester,
+        session: current.session,
+      },
+      next: {
+        semester: nextSemester,
+        session: nextSession,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching semesters", error: err.message });
   }
 });
 

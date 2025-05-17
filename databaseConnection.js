@@ -128,6 +128,29 @@ const SemesterSession = mongoose.model(
   semesterSessionSchema
 );
 
+
+// --- 7. Course Feedback Schema ---
+const courseFeedbackSchema = new mongoose.Schema(
+  {
+    course: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Course",
+      required: true,
+    },
+    student: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    session: { type: String, required: true }, // e.g. '2023/2024'
+    comment: { type: String, required: true },  // The actual feedback text
+    createdAt: { type: Date, default: Date.now }
+  },
+  { timestamps: true }
+);
+
+const CourseFeedback = mongoose.model("CourseFeedback", courseFeedbackSchema);
+
 // --- Database Connection ---
 async function startConnection() {
   try {
@@ -152,4 +175,5 @@ module.exports = {
   PrivilegeRequest,
   Result,
   SemesterSession,
+  CourseFeedback
 };
