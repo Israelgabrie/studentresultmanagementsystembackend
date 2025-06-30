@@ -2,6 +2,11 @@ const express = require("express");
 const adminRouter = express.Router();
 const department = require("../departments.js");
 const bcrypt = require("bcrypt");
+const ExcelJS = require("exceljs");
+const multer = require("multer");
+const upload = multer({ storage: multer.memoryStorage() });
+
+
 
 const {
   startConnection,
@@ -21,6 +26,7 @@ function getGrade(score) {
   if (score >= 45) return "D";
   return "F";
 }
+
 
 adminRouter.post("/getRequestStatus", async (req, res) => {
   try {
@@ -124,158 +130,6 @@ adminRouter.post("/uploadRight", async (req, res) => {
   }
 });
 
-
-
-// --- 2. Upload Test Result ---
-adminRouter.post("/uploadTest", async (req, res) => {
-  try {
-    const {
-      idNumber,
-      courseCode,
-      session,
-      semester,
-      score,
-      unit,
-      overallScore,
-      uploadedById,
-    } = req.body;
-
-    if (
-      !idNumber ||
-      !courseCode ||
-      !session ||
-      !semester ||
-      score == null ||
-      !unit ||
-      !uploadedById
-    ) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Missing required fields" });
-    }
-
-    const student = await User.findOne({ idNumber });
-    const course = await Course.findOne({ courseCode });
-    const uploadedBy = await User.findById(uploadedById);
-
-    if (!student || !course || !uploadedBy) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "Student, course, or uploader not found",
-        });
-    }
-
-    let result = await Result.findOne({
-      student: student._id,
-      course: course._id,
-      session,
-      semester,
-    });
-
-    if (!result) {
-      result = new Result({
-        student: student._id,
-        course: course._id,
-        session,
-        semester,
-        testScore: score,
-        unit,
-        testOverall: overallScore,
-        uploadedBy: uploadedBy._id,
-      });
-    } else {
-      result.testScore = score;
-      result.unit = unit;
-      result.testOverall = overallScore;
-    }
-
-    const test = result.testScore || 0;
-    const exam = result.examScore || 0;
-
-    result.totalScore = test + exam;
-    result.grade = getGrade(result.totalScore);
-
-    await result.save();
-
-    res
-      .status(200)
-      .json({ success: true, message: "Test result uploaded", result });
-  } catch (err) {
-    console.error("Test upload error:", err);
-    res.status(500).json({ success: false, message: "Server error" });
-  }
-});
-
-// --- 3. Upload Exam Result ---
-adminRouter.post("/uploadExam", async (req, res) => {
-  try {
-    const {
-      idNumber,
-      courseCode,
-      session,
-      semester,
-      score,
-      overallScore,
-      uploadedById,
-    } = req.body;
-
-    if (
-      !idNumber ||
-      !courseCode ||
-      !session ||
-      !semester ||
-      score == null ||
-      !uploadedById
-    ) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
-
-    const student = await User.findOne({ idNumber });
-    const course = await Course.findOne({ courseCode });
-    const uploadedBy = await User.findById(uploadedById);
-
-    if (!student || !course || !uploadedBy) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "Student, course, or uploader not found",
-        });
-    }
-
-    const result = await Result.findOne({
-      student: student._id,
-      course: course._id,
-      session,
-      semester,
-    });
-
-    if (!result) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Test must be uploaded before exam" });
-    }
-
-    result.examScore = score;
-    result.examOverall = overallScore;
-
-    const test = result.testScore || 0;
-    const exam = result.examScore || 0;
-
-    result.totalScore = test + exam;
-    result.grade = getGrade(result.totalScore);
-
-    await result.save();
-
-    res.status(200).json({ message: "Exam result uploaded", result });
-  } catch (err) {
-    console.error("Exam upload error:", err);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
 // Route to get lecturer's approved courses + previously uploaded results + session list
 adminRouter.post("/uploadResultData", async (req, res) => {
   try {
@@ -347,6 +201,179 @@ adminRouter.post("/uploadResultData", async (req, res) => {
   }
 });
 
+adminRouter.post(
+  "/upload-marksheet",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const userId = req.body.userId;
+      const file = req.file;
+
+      if (!file || !userId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Missing file or userId" });
+      }
+
+      const lecturer = await User.findById(userId);
+      if (!lecturer || lecturer.accountType !== "admin") {
+        return res
+          .status(403)
+          .json({ success: false, message: "Invalid lecturer" });
+      }
+
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(file.buffer);
+      const sheet = workbook.worksheets[0];
+
+      // Get metadata from top rows
+      const courseCode = sheet
+        .getCell("A1")
+        .value?.toString()
+        .split(":")[1]
+        ?.trim();
+      const courseTitle = sheet
+        .getCell("A2")
+        .value?.toString()
+        .split(":")[1]
+        ?.trim();
+      const semester = sheet
+        .getCell("A3")
+        .value?.toString()
+        .split(":")[1]
+        ?.trim();
+      const session = sheet
+        .getCell("A4")
+        .value?.toString()
+        .split(":")[1]
+        ?.trim();
+
+      if (!courseCode || !courseTitle || !semester || !session) {
+        return res.status(400).json({
+          success: false,
+          message: "Incomplete metadata in marksheet",
+        });
+      }
+
+      const course = await Course.findOne({ courseCode });
+      if (!course) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Course not found in DB" });
+      }
+
+      const unit = 2; // TEMPORARY until real unit data is available
+
+      // Find starting row for data table
+      let startRow = 1;
+      while (
+        sheet.getRow(startRow).getCell(1).value !== "S/N" &&
+        startRow < 100
+      ) {
+        startRow++;
+      }
+      startRow++; // move to first student row
+
+      let successCount = 0;
+      let failCount = 0;
+      const errors = [];
+
+      for (let row = startRow; row <= sheet.rowCount; row++) {
+        const r = sheet.getRow(row);
+        const fullName = r.getCell(2).value?.toString().trim();
+        const matricNumber = r.getCell(3).value?.toString().trim();
+        const testScore = parseFloat(r.getCell(4).value);
+        const examScore = parseFloat(r.getCell(5).value);
+
+        if (
+          !fullName ||
+          !matricNumber ||
+          isNaN(testScore) ||
+          isNaN(examScore)
+        ) {
+          failCount++;
+          errors.push(`Row ${row}: Incomplete or invalid data`);
+          continue;
+        }
+
+        const student = await User.findOne({
+          idNumber: matricNumber,
+          accountType: "student",
+        });
+        if (!student) {
+          failCount++;
+          errors.push(`Row ${row}: Student not found`);
+          continue;
+        }
+
+        // Validate semester rule
+        const courseNumber = parseInt(courseCode.replace(/\D/g, ""), 10);
+        const isEven = courseNumber % 2 === 0;
+        if (isEven && semester !== "Second") {
+          errors.push(
+            `Row ${row}: Even-numbered course must be Second semester`
+          );
+          failCount++;
+          continue;
+        }
+        if (!isEven && semester !== "First") {
+          errors.push(`Row ${row}: Odd-numbered course must be First semester`);
+          failCount++;
+          continue;
+        }
+
+        const total = testScore + examScore;
+        const grade = getGrade(total);
+
+        // Find or create result
+        let result = await Result.findOne({
+          student: student._id,
+          course: course._id,
+          semester,
+          session,
+        });
+
+        if (result && result.approved) {
+          errors.push(`Row ${row}: Result already approved`);
+          failCount++;
+          continue;
+        }
+
+        if (!result) {
+          result = new Result({
+            student: student._id,
+            course: course._id,
+            semester,
+            session,
+            unit,
+            uploadedBy: userId,
+          });
+        }
+
+        result.testScore = testScore;
+        result.examScore = examScore;
+        result.totalScore = total;
+        result.grade = grade;
+
+        await result.save();
+        successCount++;
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `${successCount}/${
+          successCount + failCount
+        } results uploaded successfully`,
+        errors,
+      });
+    } catch (err) {
+      console.error("Upload error:", err);
+      return res
+        .status(500)
+        .json({ success: false, message: "Server error uploading marksheet" });
+    }
+  }
+);
 
 adminRouter.post("/uploadResult", async (req, res) => {
   try {
@@ -374,44 +401,68 @@ adminRouter.post("/uploadResult", async (req, res) => {
       !unit ||
       !userId
     ) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Missing required fields" });
     }
 
     if (!["test", "exam"].includes(resultType)) {
-      return res.status(400).json({ success: false, message: "Invalid result type" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid result type" });
     }
 
     const admin = await User.findById(userId);
     if (!admin || admin.accountType !== "admin") {
-      return res.status(404).json({ success: false, message: "Invalid admin ID" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Invalid admin ID" });
     }
 
     const student = await User.findOne({ idNumber: matricNumber });
     if (!student || student.accountType !== "student") {
-      return res.status(404).json({ success: false, message: "Student not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Student not found" });
     }
 
     const course = await Course.findOne({ courseCode });
     if (!course) {
-      return res.status(404).json({ success: false, message: "Course not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Course not found" });
     }
 
     // Semester rule validation (even/odd course code)
     const courseNumber = parseInt(courseCode.replace(/\D/g, ""), 10);
     const isEven = courseNumber % 2 === 0;
     if (isEven && semester !== "Second") {
-      return res.status(400).json({ success: false, message: "Even-numbered courses can only be uploaded for the Second semester" });
+      return res.status(400).json({
+        success: false,
+        message:
+          "Even-numbered courses can only be uploaded for the Second semester",
+      });
     }
     if (!isEven && semester !== "First") {
-      return res.status(400).json({ success: false, message: "Odd-numbered courses can only be uploaded for the First semester" });
+      return res.status(400).json({
+        success: false,
+        message:
+          "Odd-numbered courses can only be uploaded for the First semester",
+      });
     }
 
     // Score validation
     if (resultType === "test" && (score < 0 || score > 30)) {
-      return res.status(400).json({ success: false, message: "Test score must be between 0 and 30" });
+      return res.status(400).json({
+        success: false,
+        message: "Test score must be between 0 and 30",
+      });
     }
     if (resultType === "exam" && (score < 0 || score > 70)) {
-      return res.status(400).json({ success: false, message: "Exam score must be between 0 and 70" });
+      return res.status(400).json({
+        success: false,
+        message: "Exam score must be between 0 and 70",
+      });
     }
 
     let result = await Result.findOne({
@@ -494,36 +545,206 @@ adminRouter.post("/uploadResult", async (req, res) => {
   }
 });
 
+adminRouter.post("/generate-marksheet", async (req, res) => {
+  try {
+    const { courseCode, semester, session, userId } = req.body;
 
+    if (!courseCode || !semester || !session || !userId) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Missing required fields: courseCode, semester, session, userId",
+      });
+    }
+
+    const course = await Course.findOne({ courseCode });
+    if (!course) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Course not found" });
+    }
+
+    // Semester rule validation (even/odd course code)
+    const courseNumber = parseInt(courseCode.replace(/\D/g, ""), 10);
+    const isEven = courseNumber % 2 === 0;
+    if (isEven && semester !== "Second") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Even-numbered courses can only be uploaded for the Second semester",
+      });
+    }
+    if (!isEven && semester !== "First") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Odd-numbered courses can only be uploaded for the First semester",
+      });
+    }
+
+    const lecturer = await User.findById(userId);
+    if (!lecturer || lecturer.accountType !== "admin") {
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: "Lecturer not found or not an admin",
+        });
+    }
+
+    const students = await User.find({ accountType: "student" });
+
+    const unit = getCourseUnitTemporarily(courseCode); // <--- TEMPORARY UNIT
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Marksheet");
+
+    let rowIdx = 1;
+
+    // Header metadata rows
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(
+      `A${rowIdx++}`
+    ).value = `Course Code: ${course.courseCode}`;
+
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(
+      `A${rowIdx++}`
+    ).value = `Course Title: ${course.courseTitle}`;
+
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(`A${rowIdx++}`).value = `Semester: ${semester}`;
+
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(`A${rowIdx++}`).value = `Session: ${session}`;
+
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(
+      `A${rowIdx++}`
+    ).value = `Lecturer: ${lecturer.firstName} ${lecturer.lastName}`;
+
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(`A${rowIdx++}`).value = `Unit: ${unit}`;
+
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(`A${rowIdx++}`).value = `Max Test Score:`;
+
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(`A${rowIdx++}`).value = `Max Exam Score:`;
+
+    worksheet.mergeCells(`A${rowIdx}:E${rowIdx}`);
+    worksheet.getCell(`A${rowIdx++}`).value = `Approved By Senate:`;
+
+    // Empty line before the table
+    rowIdx++;
+
+    // Table header
+    const headerRow = worksheet.getRow(rowIdx);
+    headerRow.values = [
+      "S/N",
+      "Name",
+      "Matric Number",
+      "Test Score",
+      "Exam Score",
+    ];
+    headerRow.font = { bold: true };
+    headerRow.alignment = { horizontal: "center" };
+    rowIdx++;
+
+    // Student rows with pre-filled scores if available
+    for (let i = 0; i < students.length; i++) {
+      const student = students[i];
+      const existingResult = await Result.findOne({
+        student: student._id,
+        course: course._id,
+        semester,
+        session,
+      });
+
+      const testScore = existingResult?.testScore ?? "";
+      const examScore = existingResult?.examScore ?? "";
+
+      const row = worksheet.getRow(rowIdx++);
+      row.values = [
+        i + 1,
+        `${student.firstName} ${student.lastName}`,
+        student.idNumber,
+        testScore,
+        examScore,
+      ];
+    }
+
+    // Column widths
+    worksheet.getColumn(1).width = 6;
+    worksheet.getColumn(2).width = 25;
+    worksheet.getColumn(3).width = 20;
+    worksheet.getColumn(4).width = 15;
+    worksheet.getColumn(5).width = 15;
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=marksheet_${courseCode}.xlsx`
+    );
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error("Error generating marksheet:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error generating marksheet" });
+  }
+});
+
+// Template function for now — always returns 3
+function getCourseUnitTemporarily(courseCode) {
+  return 3;
+}
 
 adminRouter.post("/studentPerformance", async (req, res) => {
   try {
     const { matricNumber } = req.body;
 
     if (!matricNumber) {
-      return res.status(400).json({ success: false, message: "Matric number is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Matric number is required" });
     }
 
     const student = await User.findOne({ idNumber: matricNumber });
-    console.log(student.session)
-    console.log(student)
+    console.log(student.session);
+    console.log(student);
 
     if (!student || student.accountType !== "student") {
-      return res.status(404).json({ success: false, message: "Student not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Student not found" });
     }
 
-    const approvedResults = await Result.find({ student: student._id, approved: true })
+    const approvedResults = await Result.find({
+      student: student._id,
+      approved: true,
+    })
       .populate("course", "courseCode courseTitle")
       .sort({ session: 1, semester: 1 });
 
     if (!approvedResults.length) {
-      return res.status(404).json({ success: false, message: "No approved results found for this student" });
+      return res.status(404).json({
+        success: false,
+        message: "No approved results found for this student",
+      });
     }
 
     // Get the current active session
     const currentSessionDoc = await SemesterSession.findOne({ isActive: true });
     if (!currentSessionDoc || !currentSessionDoc.session) {
-      return res.status(500).json({ success: false, message: "Active session not found or invalid format" });
+      return res.status(500).json({
+        success: false,
+        message: "Active session not found or invalid format",
+      });
     }
 
     const studentSession = student.session; // e.g., "2023/2024"
@@ -542,7 +763,9 @@ adminRouter.post("/studentPerformance", async (req, res) => {
 
     // If either is invalid, return error
     if (!studentStartYear || !currentStartYear) {
-      return res.status(400).json({ success: false, message: "Invalid session format" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid session format" });
     }
 
     const levelNumber = (currentStartYear - studentStartYear + 1) * 100;
@@ -566,7 +789,10 @@ adminRouter.post("/studentPerformance", async (req, res) => {
 
       // GPA per semester calculation
       if (!sessionSemesterMap[semesterKey]) {
-        sessionSemesterMap[semesterKey] = { totalGradePoints: 0, totalUnits: 0 };
+        sessionSemesterMap[semesterKey] = {
+          totalGradePoints: 0,
+          totalUnits: 0,
+        };
       }
       sessionSemesterMap[semesterKey].totalGradePoints += gradePoint * res.unit;
       sessionSemesterMap[semesterKey].totalUnits += res.unit;
@@ -591,21 +817,29 @@ adminRouter.post("/studentPerformance", async (req, res) => {
     // Semester GPA list
     let semId = 1;
     for (const [key, data] of Object.entries(sessionSemesterMap)) {
-      const gpa = data.totalUnits ? (data.totalGradePoints / data.totalUnits).toFixed(2) : 0;
+      const gpa = data.totalUnits
+        ? (data.totalGradePoints / data.totalUnits).toFixed(2)
+        : 0;
       semesterGPA.push({ id: semId++, name: key, gpa: parseFloat(gpa) });
     }
 
     // Grade distribution with percentages
     const totalCourses = approvedResults.length;
-    const gradeDistribution = Object.entries(gradeDistributionCount).map(([grade, count]) => ({
-      grade,
-      count,
-      percentage: Math.round((count / totalCourses) * 100),
-    }));
+    const gradeDistribution = Object.entries(gradeDistributionCount).map(
+      ([grade, count]) => ({
+        grade,
+        count,
+        percentage: Math.round((count / totalCourses) * 100),
+      })
+    );
 
     // Percentile rank is mocked for now
-    const percentile = Math.round((totalGradePointsAll / (totalUnitsAll * 5)) * 100);
-    const cgpa = totalUnitsAll ? (totalGradePointsAll / totalUnitsAll).toFixed(2) : "0.00";
+    const percentile = Math.round(
+      (totalGradePointsAll / (totalUnitsAll * 5)) * 100
+    );
+    const cgpa = totalUnitsAll
+      ? (totalGradePointsAll / totalUnitsAll).toFixed(2)
+      : "0.00";
 
     return res.status(200).json({
       success: true,
@@ -629,7 +863,6 @@ adminRouter.post("/studentPerformance", async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
-
 
 adminRouter.post("/course-session-analysis", async (req, res) => {
   try {
@@ -658,11 +891,14 @@ adminRouter.post("/course-session-analysis", async (req, res) => {
 
       const totalStudents = results.length;
       if (!totalStudents) {
-        return res.status(404).json({ success: false, message: "No results found" });
+        return res
+          .status(404)
+          .json({ success: false, message: "No results found" });
       }
 
       const scoreStats = results.map((r) => r.totalScore);
-      const averageScore = scoreStats.reduce((a, b) => a + b, 0) / totalStudents;
+      const averageScore =
+        scoreStats.reduce((a, b) => a + b, 0) / totalStudents;
       const highestScore = Math.max(...scoreStats);
       const lowestScore = Math.min(...scoreStats);
 
@@ -684,13 +920,17 @@ adminRouter.post("/course-session-analysis", async (req, res) => {
         };
       });
 
-      const topPerformers = allPerformers.sort((a, b) => b.score - a.score).slice(0, 5);
+      const topPerformers = allPerformers
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
 
-      const gradeDistribution = Object.entries(gradeMap).map(([grade, count]) => ({
-        grade,
-        count,
-        percentage: Math.round((count / totalStudents) * 100),
-      }));
+      const gradeDistribution = Object.entries(gradeMap).map(
+        ([grade, count]) => ({
+          grade,
+          count,
+          percentage: Math.round((count / totalStudents) * 100),
+        })
+      );
 
       const scoreRangeData = scoreRanges.map((count, i) => ({
         range: `${i * 10}-${i * 10 + 9}`,
@@ -720,10 +960,15 @@ adminRouter.post("/course-session-analysis", async (req, res) => {
 
     // ----------------- SESSION ANALYSIS -----------------
     if (analysisType === "session" && session) {
-      const results = await Result.find({ session, approved: true }).populate("student", "firstName lastName department");
+      const results = await Result.find({ session, approved: true }).populate(
+        "student",
+        "firstName lastName department"
+      );
 
       if (!results.length) {
-        return res.status(404).json({ success: false, message: "No session data found" });
+        return res
+          .status(404)
+          .json({ success: false, message: "No session data found" });
       }
 
       const departmentMap = {};
@@ -773,7 +1018,8 @@ adminRouter.post("/course-session-analysis", async (req, res) => {
       }
 
       const totalStudents = Object.keys(studentStats).length;
-      const totalCourses = [...new Set(results.map((r) => r.course.toString()))].length;
+      const totalCourses = [...new Set(results.map((r) => r.course.toString()))]
+        .length;
 
       const topPerformers = Object.entries(studentStats)
         .map(([_, s]) => ({
@@ -785,25 +1031,31 @@ adminRouter.post("/course-session-analysis", async (req, res) => {
         .slice(0, 5);
 
       const avgGPA =
-        Object.values(studentStats).reduce((sum, s) => sum + (s.totalPoints / s.totalUnits), 0) /
-        totalStudents;
+        Object.values(studentStats).reduce(
+          (sum, s) => sum + s.totalPoints / s.totalUnits,
+          0
+        ) / totalStudents;
 
-      const departmentPerformance = Object.entries(departmentMap).map(([dept, d]) => {
-        const studentCount = d.studentIds.size || 1;
-        const passedCount = d.passedStudentIds.size || 0;
+      const departmentPerformance = Object.entries(departmentMap).map(
+        ([dept, d]) => {
+          const studentCount = d.studentIds.size || 1;
+          const passedCount = d.passedStudentIds.size || 0;
 
-        return {
-          department: dept,
-          averageGPA: d.totalUnits ? d.totalPoints / d.totalUnits : 0,
-          passRate: Math.round((passedCount / studentCount) * 100), // ✅ fixed
-        };
-      });
+          return {
+            department: dept,
+            averageGPA: d.totalUnits ? d.totalPoints / d.totalUnits : 0,
+            passRate: Math.round((passedCount / studentCount) * 100), // ✅ fixed
+          };
+        }
+      );
 
-      const gradeDistribution = Object.entries(gradeMap).map(([grade, count]) => ({
-        grade,
-        count,
-        percentage: Math.round((count / results.length) * 100),
-      }));
+      const gradeDistribution = Object.entries(gradeMap).map(
+        ([grade, count]) => ({
+          grade,
+          count,
+          percentage: Math.round((count / results.length) * 100),
+        })
+      );
 
       return res.status(200).json({
         success: true,
@@ -820,13 +1072,14 @@ adminRouter.post("/course-session-analysis", async (req, res) => {
       });
     }
 
-    return res.status(400).json({ success: false, message: "Invalid parameters" });
+    return res
+      .status(400)
+      .json({ success: false, message: "Invalid parameters" });
   } catch (err) {
     console.error("Error in course-session analysis:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
-
 
 adminRouter.get("/courses-and-sessions", async (req, res) => {
   try {
@@ -844,15 +1097,14 @@ adminRouter.get("/courses-and-sessions", async (req, res) => {
   }
 });
 
-
 adminRouter.post("/change-password", async (req, res) => {
   const { adminId, oldPassword, newPassword } = req.body;
 
-  console.log( adminId, oldPassword, newPassword )
+  console.log(adminId, oldPassword, newPassword);
 
   try {
     const admin = await User.findById(adminId);
-    if (!admin || admin.accountType !== "admin") {
+    if (!admin) {
       return res.status(404).json({ message: "Admin not found" });
     }
 
@@ -865,12 +1117,15 @@ adminRouter.post("/change-password", async (req, res) => {
     admin.password = hashedPassword;
     await admin.save();
 
-    res.status(200).json({success:true, message: "Password changed successfully" });
+    res
+      .status(200)
+      .json({ success: true, message: "Password changed successfully" });
   } catch (err) {
-    res.status(500).json({ message: "Error changing password", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Error changing password", error: err.message });
   }
 });
-
 
 adminRouter.get("/semester/current-next", async (req, res) => {
   try {
@@ -893,7 +1148,7 @@ adminRouter.get("/semester/current-next", async (req, res) => {
     }
 
     res.status(200).json({
-      success:true,
+      success: true,
       current: {
         semester: current.semester,
         session: current.session,
@@ -904,10 +1159,10 @@ adminRouter.get("/semester/current-next", async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ message: "Error fetching semesters", error: err.message });
+    res
+      .status(500)
+      .json({ message: "Error fetching semesters", error: err.message });
   }
 });
-
-
 
 module.exports = { adminRouter };

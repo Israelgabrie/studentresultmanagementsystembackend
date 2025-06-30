@@ -9,8 +9,10 @@ const { getAllCourses, getCourseRequests, removeCourseRequest ,getAllCourseReque
 // const department = require("./departments").departments;
 const cors = require("cors");
 const {superAdminRouter} = require("./superAdminRoutes/superAdminRouter");
-const { Department } = require("./databaseConnection");
+const { Department,Course } = require("./databaseConnection");
 const { studentRouter } = require("./studentRouter");
+const path = require("path");
+const fs = require("fs")
 
 
 // ✅ CORS Configuration
@@ -29,6 +31,8 @@ app.use("/user", userRouter);
 app.use("/admin", adminRouter);
 app.use("/superAdmin",superAdminRouter);
 app.use("/student",studentRouter);
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 
 // API route to get departments
 app.get("/getDepartment", async(req, res) => {

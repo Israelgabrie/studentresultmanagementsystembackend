@@ -13,6 +13,7 @@ const userSchema = new mongoose.Schema(
     department: { type: String }, // <- Add this
     programme: { type: String },  // <- Add this
     session: { type: String },
+    blocked:{type : Boolean ,default:false}
 
   },
   { timestamps: true }
@@ -143,7 +144,7 @@ const courseFeedbackSchema = new mongoose.Schema(
       required: true,
     },
     session: { type: String, required: true }, // e.g. '2023/2024'
-    comment: { type: String, required: true },  // The actual feedback text
+    text: { type: String, required: true },  // The actual feedback text
     createdAt: { type: Date, default: Date.now }
   },
   { timestamps: true }
@@ -167,7 +168,76 @@ async function startConnection() {
   }
 }
 
+
+// --- 8. Student Complaint Schema ---
+const studentComplaintSchema = new mongoose.Schema(
+  {
+    student: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    complaintType: {
+      type: String,
+      enum: ["missing result", "system error", "wrong grade", "other"],
+      required: true,
+    },
+    course: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Course",
+      required: false, // may not apply to all types of complaints
+    },
+    description: {
+      type: String,
+      required: true,
+    },
+    proofFileUrl: {
+      type: String,
+      required: false, // Only for complaints like 'missing result'
+    },
+    status: {
+      type: String,
+      enum: ["pending", "in progress", "resolved", "rejected"],
+      default: "pending",
+    },
+    assignedAdmin: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: false, // to be assigned by system or manually later
+    },
+    session: {
+      type: String,
+      required: false,
+    },
+    semester: {
+      type: String,
+      required: false,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { timestamps: true }
+);
+
+const StudentComplaint = mongoose.model("StudentComplaint", studentComplaintSchema);
+
+// --- 9. Event Schema ---
+const eventSchema = new mongoose.Schema(
+  {
+    date: { type: String, required: true }, 
+    text: { type: String, required: true },
+    location: { type: String, required: true },
+  },
+  { timestamps: true }
+);
+
+const Event = mongoose.model("Event", eventSchema);
+
+
 module.exports = {
+  StudentComplaint,
   startConnection,
   User,
   Department,
@@ -175,5 +245,6 @@ module.exports = {
   PrivilegeRequest,
   Result,
   SemesterSession,
-  CourseFeedback
+  CourseFeedback,
+  Event
 };
