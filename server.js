@@ -34,6 +34,11 @@ app.use("/student",studentRouter);
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 
+// Serve the built frontend
+app.use(express.static(path.join(__dirname, "dist"))); // or "frontend/dist" if it's inside frontend/
+
+
+
 // API route to get departments
 app.get("/getDepartment", async(req, res) => {
     try {
@@ -51,6 +56,15 @@ app.get("/getDepartment", async(req, res) => {
         });
     }
 });
+
+
+// Handle SPA (like Angular/React with routing)
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
+
+
+
 
 async function startServer() {
     const isConnected = await startConnection();

@@ -1,4 +1,6 @@
+const { save } = require("pdfkit");
 const {Department} = require("./databaseConnection.js");
+const Course = require("./databaseConnection.js").Course;
 
 //This is the file that contains all the departments and the programme under each of them
 const departments = [
@@ -152,7 +154,34 @@ const departments = [
 //     })
 //     newDepartment.save()
 // })
-  
+
+const saveCoursesOnly = async () => {
+  for (const department of departments) {
+    if (department.courses && Array.isArray(department.courses)) {
+      for (const course of department.courses) {
+        try {
+          const existing = await Course.findOne({ courseCode: course.courseCode });
+          if (!existing) {
+            const newCourse = new Course({
+              courseCode: course.courseCode,
+              courseTitle: course.courseTitle
+            });
+            await newCourse.save();
+            console.log(`Saved course: ${course.courseCode}`);
+          } else {
+            console.log(`Course already exists: ${course.courseCode}`);
+          }
+        } catch (error) {
+          console.error(`Error saving ${course.courseCode}:`, error.message);
+        }
+      }
+    }
+  }
+};
+
+//   saveCoursesOnly()
+//     .then(() => console.log("All courses processed"))
+//     .catch((error) => console.error("Error processing courses:", error));
   
 
  module.exports = { departments };
