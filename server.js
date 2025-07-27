@@ -42,7 +42,9 @@ app.use(express.static(path.join(__dirname, "dist"))); // or "frontend/dist" if 
 // API route to get departments
 app.get("/getDepartment", async(req, res) => {
     try {
+        console.log("Fetching departments...");
         const department = await Department.find();
+        console.log(department)
         res.send({
             success: true,
             message: "Departments retrieved successfully",
