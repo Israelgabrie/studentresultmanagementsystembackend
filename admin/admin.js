@@ -1,7 +1,7 @@
 const express = require("express");
 const adminRouter = express.Router();
 const department = require("../departments.js");
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const ExcelJS = require("exceljs");
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() });
